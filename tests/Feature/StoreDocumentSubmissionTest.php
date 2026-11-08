@@ -9,6 +9,7 @@ use LBHurtado\FormHandlerDocument\Contracts\DocumentAccess;
 use LBHurtado\FormHandlerDocument\Data\DocumentUploadContext;
 use LBHurtado\FormHandlerDocument\DocumentHandler;
 use LBHurtado\FormHandlerDocument\Models\DocumentSubmission;
+use LBHurtado\FormHandlerDocument\Services\PruneStagedDocuments;
 use LBHurtado\FormHandlerDocument\Services\StoreDocumentSubmission;
 
 beforeEach(function (): void {
@@ -37,6 +38,34 @@ it('does not reuse an upload from a different participant', function (): void {
     $first = $service->store(UploadedFile::fake()->createWithContent('id.pdf', $contents), new DocumentUploadContext(str_repeat('a', 64), str_repeat('b', 64), 'id', ['application/pdf']));
     $other = $service->store(UploadedFile::fake()->createWithContent('id.pdf', $contents), new DocumentUploadContext(str_repeat('a', 64), str_repeat('c', 64), 'id', ['application/pdf']));
     expect($other->id)->not->toBe($first->id);
+});
+
+it('creates a new submission if the previous stored file is missing', function (): void {
+    $scope = new DocumentUploadContext(str_repeat('a', 64), str_repeat('b', 64), 'id', ['application/pdf']);
+    $store = app(StoreDocumentSubmission::class);
+    $file = fn () => UploadedFile::fake()->createWithContent('id.pdf', "%PDF-1.4\n% sample\n");
+    $first = $store->store($file(), $scope);
+    Storage::disk('private-documents')->delete($first->getFirstMedia('documents')->getPathRelativeToRoot());
+
+    $replacement = $store->store($file(), $scope);
+    expect($replacement->id)->not->toBe($first->id);
+    Storage::disk('private-documents')->assertExists($replacement->getFirstMedia('documents')->getPathRelativeToRoot());
+});
+
+it('removes expired staged files while preserving linked submissions', function (): void {
+    $store = app(StoreDocumentSubmission::class);
+    $file = fn () => UploadedFile::fake()->createWithContent('id.pdf', "%PDF-1.4\n% sample\n");
+    $staged = $store->store($file(), new DocumentUploadContext(str_repeat('a', 64), str_repeat('b', 64), 'id', ['application/pdf']));
+    $linked = $store->store($file(), new DocumentUploadContext(str_repeat('a', 64), str_repeat('c', 64), 'id', ['application/pdf']));
+    $linked->forceFill(['status' => 'linked'])->save();
+    DocumentSubmission::query()->whereKey([$staged->id, $linked->id])->update(['updated_at' => now()->subDays(3)]);
+    $stagedPath = $staged->getFirstMedia('documents')->getPathRelativeToRoot();
+    $linkedPath = $linked->getFirstMedia('documents')->getPathRelativeToRoot();
+
+    expect(app(PruneStagedDocuments::class)->prune())->toBe(1);
+    Storage::disk('private-documents')->assertMissing($stagedPath);
+    Storage::disk('private-documents')->assertExists($linkedPath);
+    expect($linked->fresh()->status)->toBe('linked');
 });
 
 it('requires all required files before advancing', function (): void {

@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace LBHurtado\FormHandlerDocument;
 
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\ServiceProvider;
 use LBHurtado\FormFlowManager\Services\FormFlowPresentationResolver;
 use LBHurtado\FormHandlerDocument\Contracts\DocumentAccess;
 use LBHurtado\FormHandlerDocument\Services\DenyDocumentAccess;
+use LBHurtado\FormHandlerDocument\Services\PruneStagedDocuments;
 
 final class DocumentHandlerServiceProvider extends ServiceProvider
 {
@@ -26,5 +28,11 @@ final class DocumentHandlerServiceProvider extends ServiceProvider
         $handlers['documents'] = DocumentHandler::class;
         config(['form-flow.handlers' => $handlers]);
         app(FormFlowPresentationResolver::class)->registerScreens(['documents']);
+        if ($this->app->runningInConsole()) {
+            $this->app->afterResolving(Schedule::class, function ($schedule): void {
+                $schedule->call(fn () => app(PruneStagedDocuments::class)->prune())
+                    ->daily()->name('form-handler-document:prune-staged')->withoutOverlapping();
+            });
+        }
     }
 }

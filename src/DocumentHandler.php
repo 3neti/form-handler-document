@@ -106,7 +106,7 @@ final class DocumentHandler implements FormHandlerInterface, FormHandlerPreviewI
                 $scope = app(DocumentAccess::class)->authorizeUpload(request(), $flowId, $key);
                 $submission = DocumentSubmission::query()->where('flow_hash', $scope->flowHash)
                     ->where('participant_hash', $scope->participantHash)->where('document_key', $key)
-                    ->whereIn('status', ['staged', 'linked'])->latest()->first();
+                    ->whereIn('status', ['staged', 'linked'])->orderByDesc('id')->first();
                 $media = $submission?->getFirstMedia('documents');
                 if ($submission !== null && $media !== null && Storage::disk($media->disk)->exists($media->getPathRelativeToRoot())
                     && in_array($submission->mime_type, $scope->acceptedMimeTypes, true)) {

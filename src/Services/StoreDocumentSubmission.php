@@ -48,8 +48,12 @@ final readonly class StoreDocumentSubmission
                 DB::table('form_flow_document_scopes')->where('scope_hash', $scope)->lockForUpdate()->first();
                 $existing = DocumentSubmission::query()->where('flow_hash', $context->flowHash)
                     ->where('participant_hash', $context->participantHash)->where('document_key', $context->documentKey)
-                    ->where('sha256', $sha256)->whereIn('status', ['staged', 'linked'])->latest()->first();
-                if ($existing !== null && $existing->hasMedia('documents')) {
+                    ->where('sha256', $sha256)->whereIn('status', ['staged', 'linked'])->orderByDesc('id')->lockForUpdate()->first();
+                if ($existing !== null && $this->isStoredFileIntact($existing)) {
+                    if ($existing->status === 'staged') {
+                        $existing->touch();
+                    }
+
                     return $existing;
                 }
 
@@ -62,6 +66,7 @@ final readonly class StoreDocumentSubmission
                 ])->save();
                 $media = $submission->addMedia($file)->usingFileName(Str::uuid().'.'.$extension)->toMediaCollection('documents', $disk);
                 $storedPath = $media->getPathRelativeToRoot();
+                Storage::disk($disk)->setVisibility($storedPath, 'private');
 
                 return $submission;
             });
@@ -71,5 +76,25 @@ final readonly class StoreDocumentSubmission
             }
             throw $exception;
         }
+    }
+
+    private function isStoredFileIntact(DocumentSubmission $submission): bool
+    {
+        $media = $submission->getFirstMedia('documents');
+        if ($media === null || ! Storage::disk($media->disk)->exists($media->getPathRelativeToRoot())) {
+            return false;
+        }
+        $stream = Storage::disk($media->disk)->readStream($media->getPathRelativeToRoot());
+        if (! is_resource($stream)) {
+            return false;
+        }
+        $hash = hash_init('sha256');
+        try {
+            hash_update_stream($hash, $stream);
+        } finally {
+            fclose($stream);
+        }
+
+        return hash_equals($submission->sha256, hash_final($hash));
     }
 }
