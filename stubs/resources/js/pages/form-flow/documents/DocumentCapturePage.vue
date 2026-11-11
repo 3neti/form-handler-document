@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { router } from '@inertiajs/vue3';
 import FormFlowPresentation from '@/pages/form-flow/core/components/FormFlowPresentation.vue';
+import type { FormFlowPresentation as Presentation } from '@/pages/form-flow/core/components/formFlowPresentation';
 import PublicLayout from '@/layouts/PublicLayout.vue';
 
 type DocumentDefinition = { key: string; label: string; accept: string[]; required: boolean };
@@ -12,7 +13,7 @@ const props = defineProps<{
     preview_mode: boolean;
     upload_url_template: string | null;
     submit_url: string | null;
-    presentation?: Record<string, unknown> | null;
+    presentation?: Presentation | null;
 }>();
 const uploads = ref<Record<string, UploadedDocument>>(Object.fromEntries((props.existing_documents ?? []).map(item => [item.key, { ...item, name: 'File' }])));
 const active = ref<string | null>(null);
